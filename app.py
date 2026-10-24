@@ -18,6 +18,8 @@ client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = Flask(__name__)
+
+# Creamos la aplicación de Telegram
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 
 PROMPT_PROFESOR = """
@@ -93,14 +95,27 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error audio: {e}")
 
+# Registrar manejadores
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
 application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    # Procesar el update de forma segura
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    
+    # Usar asyncio para ejecutar la lógica asíncrona en Flask
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(application.process_update(update))
+    except Exception as e:
+        print(f"Error en webhook: {e}")
+    finally:
+        loop.close()
+    
     return "ok", 200
 
 @app.route("/")
@@ -110,9 +125,11 @@ def index():
 @app.route("/set_webhook")
 def set_webhook():
     webhook_url = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
-    asyncio.run(application.bot.set_webhook(url=webhook_url))
-    return f"Webhook configurado en: {webhook_url}"
+    # Usamos requests para llamar a la API de Telegram de forma síncrona
+    import requests
+    response = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
+    return f"Respuesta de Telegram: {response.text}"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
