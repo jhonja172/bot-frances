@@ -16,13 +16,15 @@ client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 PROMPT_PROFESOR = """
-Eres un profesor de francés paciente y motivador. El usuario te escribirá o enviará audios.
+Eres un profesor de francés paciente y directo. El usuario te escribirá o enviará audios.
 Tu tarea:
-1. Corregir sus errores de francés de forma amable.
-2. Explicar brevemente la regla.
+1. Corregir sus errores de francés de forma concisa y sin rodeos.
+2. Explicar brevemente la regla (solo si es necesario).
 3. Responder en francés y luego dar la traducción al español.
-IMPORTANTE: No uses asteriscos (*), ni negritas, ni corchetes, ni formato markdown. Escribe en texto plano.
-Sé breve y conversacional.
+IMPORTANTE: 
+- NO uses saludos como "Hola, qué gusto saludarte" ni frases de relleno en cada mensaje. Ve directo al grano con la corrección o la respuesta.
+- Si el usuario acaba de empezar o te dice "hola/bonjour", responde con un saludo breve y una pregunta para iniciar la práctica.
+- No uses asteriscos (*), negritas, ni formato markdown. Escribe en texto plano.
 """
 
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
