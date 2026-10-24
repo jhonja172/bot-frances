@@ -1,6 +1,5 @@
 import os
 import asyncio
-from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
@@ -16,11 +15,6 @@ RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
 
 client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-app = Flask(__name__)
-
-# Creamos la aplicación de Telegram
-application = Application.builder().token(TELEGRAM_TOKEN).build()
 
 PROMPT_PROFESOR = """
 Eres un profesor de francés paciente y motivador. El usuario te escribirá o enviará audios.
@@ -95,41 +89,23 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Error audio: {e}")
 
-# Registrar manejadores
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
-application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
+def main():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
+    application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
-def webhook():
-    # Procesar el update de forma segura
-    data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
+    # Render usa el puerto 10000 por defecto. Usamos run_webhook nativo.
+    PORT = int(os.environ.get('PORT', 10000))
+    WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
     
-    # Usar asyncio para ejecutar la lógica asíncrona en Flask
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(application.process_update(update))
-    except Exception as e:
-        print(f"Error en webhook: {e}")
-    finally:
-        loop.close()
-    
-    return "ok", 200
-
-@app.route("/")
-def index():
-    return "Bot de francés funcionando."
-
-@app.route("/set_webhook")
-def set_webhook():
-    webhook_url = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
-    # Usamos requests para llamar a la API de Telegram de forma síncrona
-    import requests
-    response = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
-    return f"Respuesta de Telegram: {response.text}"
+    print(f"Iniciando bot en modo Webhook en el puerto {PORT}...")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=WEBHOOK_URL
+    )
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    main()
