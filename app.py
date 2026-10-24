@@ -1,5 +1,4 @@
 import os
-import asyncio
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
@@ -95,11 +94,11 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
     application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
-    # Render usa el puerto 10000 por defecto. Usamos run_webhook nativo.
+    # Render nos da el puerto 10000 por defecto
     PORT = int(os.environ.get('PORT', 10000))
     WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
     
-    print(f"Iniciando bot en modo Webhook en el puerto {PORT}...")
+    print(f"Iniciando bot en modo Webhook...")
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
