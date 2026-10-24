@@ -19,41 +19,88 @@ PROMPT_PROFESOR = """
 Eres un profesor de francés conversacional y directo. El usuario te escribirá o enviará audios.
 
 TU MISIÓN EN CADA RESPUESTA:
-1. CORRIGE: Si el usuario comete un error (gramática, vocabulario o estructura), dile claramente "Pequeño error: ..." y explícale en una sola frase por qué está mal.
+1. CORRIGE: Si el usuario comete un error, dile claramente "Pequeño error: ..." y explícale en una sola frase por qué está mal.
 2. DA LA FRASE CORRECTA: Escribe la frase exacta que él debería haber dicho.
-3. CONTINÚA LA CONVERSACIÓN: Después de corregir, hazle una pregunta nueva y sencilla en francés para que siga practicando.
+3. CONTINÚA LA CONVERSACIÓN: Después de corregir, hazle una pregunta nueva y sencilla en francés.
 
 REGLAS:
 - Sé breve. No des discursos largos.
-- Responde siempre en francés, pero usa el español solo para la corrección o la traducción (entre paréntesis).
-- NO uses asteriscos (*), negritas ni formato markdown. Escribe en texto plano.
-- Si no hay ningún error, simplemente responde a lo que dijo y hazle otra pregunta.
+- Responde en francés, usa el español solo para la corrección o traducción (entre paréntesis).
+- NO uses asteriscos (*), negritas ni formato markdown.
+- Si no hay error, simplemente responde y haz otra pregunta.
 """
 
+async def obtener_perfil(chat_id):
+    """Busca las debilidades guardadas del usuario."""
+    try:
+        respuesta_db = supabase.table('perfil_errores').select('debilidades').eq('chat_id', chat_id).execute()
+        if respuesta_db.data and respuesta_db.data[0]['debilidades']:
+            return respuesta_db.data[0]['debilidades']
+    except Exception as e:
+        print(f"No se pudo leer el perfil: {e}")
+    return "Aún no hay errores registrados."
+
+async def guardar_perfil(chat_id, texto_usuario, correccion_bot):
+    """Le pide a Gemini que extraiga el error y actualice la tabla."""
+    try:
+        prompt_extraccion = f"""
+        Analiza este intercambio:
+        Usuario: {texto_usuario}
+        Profesor: {correccion_bot}
+        
+        Si el profesor corrigió un error, devuelve SOLO el tema gramatical o vocabulario fallado (ej: "Uso de être vs avoir", "Género de sustantivos", "Conjugación de verbos en presente"). 
+        Si no hubo error, devuelve la palabra "NINGUNO".
+        """
+        respuesta = client_gemini.models.generate_content(
+            model='gemini-3.5-flash-lite',
+            contents=prompt_extraccion
+        )
+        error_detectado = respuesta.text.strip()
+        
+        if error_detectado and "NINGUNO" not in error_detectado.upper():
+            # Leemos lo que ya teníamos
+            perfil_actual = await obtener_perfil(chat_id)
+            if perfil_actual == "Aún no hay errores registrados.":
+                nuevo_perfil = error_detectado
+            else:
+                nuevo_perfil = f"{perfil_actual}, {error_detectado}"
+            
+            # Actualizamos o insertamos en Supabase
+            supabase.table('perfil_errores').upsert({
+                "chat_id": chat_id,
+                "debilidades": nuevo_perfil
+            }).execute()
+            
+    except Exception as e:
+        print(f"Error guardando perfil: {e}")
+
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
-    prompt_completo = f"{PROMPT_PROFESOR}\n\nUsuario dice: {texto_usuario}"
+    chat_id = update.effective_chat.id
+    
+    # 1. Obtener el perfil de errores
+    perfil = await obtener_perfil(chat_id)
+    
+    # 2. Crear prompt con el perfil inyectado
+    prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE (Sus errores frecuentes): {perfil}\n\nUsuario dice: {texto_usuario}"
+    
+    # 3. Llamar a Gemini
     respuesta = client_gemini.models.generate_content(
         model='gemini-3.5-flash-lite',
         contents=prompt_completo
     )
     texto_respuesta = respuesta.text
     
-    try:
-        supabase.table('historial_chat').insert({
-            "chat_id": update.effective_chat.id, "role": "user", "contenido": texto_usuario
-        }).execute()
-        supabase.table('historial_chat').insert({
-            "chat_id": update.effective_chat.id, "role": "model", "contenido": texto_respuesta
-        }).execute()
-    except Exception as e:
-        print(f"Aviso Supabase: {e}")
+    # 4. Guardar el error en el perfil
+    await guardar_perfil(chat_id, texto_usuario, texto_respuesta)
 
+    # 5. Responder en Telegram
     await update.message.reply_text(texto_respuesta)
 
+    # 6. Generar y enviar audio
     try:
         texto_limpio = texto_respuesta.replace('*', '').replace('(', '').replace(')', '')
         tts = gTTS(text=texto_limpio, lang='fr', slow=False)
-        audio_path = f"respuesta_{update.effective_chat.id}.mp3"
+        audio_path = f"respuesta_{chat_id}.mp3"
         tts.save(audio_path)
         await update.message.reply_voice(voice=open(audio_path, 'rb'))
         os.remove(audio_path)
@@ -67,12 +114,15 @@ async def manejar_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await responder(update, context, update.message.text)
 
 async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     file = await context.bot.get_file(update.message.voice.file_id)
-    ruta_audio = f"voz_{update.effective_chat.id}.ogg"
+    ruta_audio = f"voz_{chat_id}.ogg"
     await file.download_to_drive(ruta_audio)
     
+    perfil = await obtener_perfil(chat_id)
     audio_file = client_gemini.files.upload(file=ruta_audio)
-    prompt_completo = f"{PROMPT_PROFESOR}\n\nEscucha este audio y responde:"
+    
+    prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE (Sus errores frecuentes): {perfil}\n\nEscucha este audio y responde:"
     
     respuesta = client_gemini.models.generate_content(
         model='gemini-3.5-flash-lite',
@@ -80,12 +130,15 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     texto_respuesta = respuesta.text
+    
+    await guardar_perfil(chat_id, "[Audio enviado]", texto_respuesta)
+    
     await update.message.reply_text(texto_respuesta)
     
     try:
         texto_limpio = texto_respuesta.replace('*', '').replace('(', '').replace(')', '')
         tts = gTTS(text=texto_limpio, lang='fr', slow=False)
-        audio_path = f"respuesta_{update.effective_chat.id}.mp3"
+        audio_path = f"respuesta_{chat_id}.mp3"
         tts.save(audio_path)
         await update.message.reply_voice(voice=open(audio_path, 'rb'))
         os.remove(audio_path)
@@ -96,18 +149,15 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     
-    # Registrar los comandos
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
     application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
-    # Configuración para Render
     PORT = int(os.environ.get('PORT', 10000))
     WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TELEGRAM_TOKEN}"
     
-    print(f"Iniciando bot en modo Webhook en el puerto {PORT}...")
+    print(f"Iniciando bot en el puerto {PORT}...")
     
-    # run_webhook se encarga de todo automáticamente
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
