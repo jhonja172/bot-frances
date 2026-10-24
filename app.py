@@ -41,36 +41,44 @@ async def obtener_perfil(chat_id):
     return "Aún no hay errores registrados."
 
 async def guardar_perfil(chat_id, texto_usuario, correccion_bot):
-    """Le pide a Gemini que extraiga el error y actualice la tabla."""
+    """Extrae el error y lo guarda en la lista de debilidades."""
     try:
+        # 1. Leemos el perfil actual
+        perfil_actual = await obtener_perfil(chat_id)
+        
+        # 2. Prompt para Gemini: Sé muy estricto
         prompt_extraccion = f"""
         Analiza este intercambio:
         Usuario: {texto_usuario}
         Profesor: {correccion_bot}
+        Perfil actual del estudiante: {perfil_actual}
         
-        Si el profesor corrigió un error, devuelve SOLO el tema gramatical o vocabulario fallado (ej: "Uso de être vs avoir", "Género de sustantivos", "Conjugación de verbos en presente"). 
-        Si no hubo error, devuelve la palabra "NINGUNO".
+        ¿El profesor corrigió un error? 
+        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être", "Género de sustantivos"). No uses puntos ni formato.
+        - Si NO: Devuelve la palabra NINGUNO.
         """
+        
         respuesta = client_gemini.models.generate_content(
             model='gemini-3.5-flash-lite',
             contents=prompt_extraccion
         )
-        error_detectado = respuesta.text.strip()
+        error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
         
         if error_detectado and "NINGUNO" not in error_detectado.upper():
-            # Leemos lo que ya teníamos
-            perfil_actual = await obtener_perfil(chat_id)
-            if perfil_actual == "Aún no hay errores registrados.":
-                nuevo_perfil = error_detectado
-            else:
-                nuevo_perfil = f"{perfil_actual}, {error_detectado}"
-            
-            # Actualizamos o insertamos en Supabase
-            supabase.table('perfil_errores').upsert({
-                "chat_id": chat_id,
-                "debilidades": nuevo_perfil
-            }).execute()
-            
+            # 3. Si el error NO está ya en el perfil, lo agregamos
+            if error_detectado.lower() not in perfil_actual.lower():
+                if perfil_actual == "Aún no hay errores registrados.":
+                    nuevo_perfil = error_detectado
+                else:
+                    nuevo_perfil = f"{perfil_actual}, {error_detectado}"
+                
+                # 4. Guardamos en Supabase
+                supabase.table('perfil_errores').upsert({
+                    "chat_id": chat_id,
+                    "debilidades": nuevo_perfil
+                }).execute()
+                print(f"Nuevo error guardado: {error_detectado}")
+                
     except Exception as e:
         print(f"Error guardando perfil: {e}")
 
