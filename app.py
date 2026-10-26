@@ -56,10 +56,11 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         Analiza este intercambio:
         Usuario: {texto_usuario}
         Profesor: {correccion_bot}
+        Perfil actual del estudiante: {perfil_actual}
         
-        ¿El profesor corrigió un error? 
-        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être").
-        - Si NO: Devuelve la palabra NINGUNO.
+        ¿El profesor corrigió un error NUEVO que NO esté ya en el perfil actual? 
+        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être"). No uses puntos.
+        - Si el error ya está en el perfil, o no hubo error: Devuelve la palabra NINGUNO.
         """
         respuesta = client_gemini.models.generate_content(
             model='gemini-3.5-flash-lite',
@@ -68,16 +69,17 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
         
         if error_detectado and "NINGUNO" not in error_detectado.upper():
-            # Usamos UPSERT para que inserte si no existe, o actualice si existe.
-            # Esto soluciona el problema de la fila borrada.
-            nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
-            
-            supabase.table('perfil_errores').upsert({
-                "chat_id": chat_id,
-                "debilidades": nuevo_perfil
-            }).execute()
-            
-            print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
+            if error_detectado.lower() not in perfil_actual.lower():
+                nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
+                
+                supabase.table('perfil_errores').upsert({
+                    "chat_id": chat_id,
+                    "debilidades": nuevo_perfil
+                }).execute()
+                
+                print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
+            else:
+                print(f"⚠️ El error '{error_detectado}' ya estaba en el perfil. No se guardó.")
                 
     except Exception as e:
         print(f"❌ ERROR DEL DETECTIVE: {e}")
@@ -116,14 +118,10 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     texto_respuesta = respuesta.text
     texto_audio = texto_respuesta.replace('*', '').replace('(', '').replace(')', '').replace('[', '').replace(']', '')
     
-    # Enviamos el texto PRIMERO
     await mensaje.reply_text(texto_respuesta)
     
-    # Guardamos el perfil EN PRIMER PLANO (para que salga en los logs al instante)
-    # Usamos asyncio.to_thread para que no bloquee el envío del audio.
     await asyncio.to_thread(guardar_perfil_sync, chat_id, texto_usuario or "[Audio]", texto_respuesta, perfil)
     
-    # Generamos y enviamos el audio
     ruta_audio_salida = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temporal:
@@ -181,3 +179,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
