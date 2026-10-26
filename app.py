@@ -56,10 +56,9 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         Analiza este intercambio:
         Usuario: {texto_usuario}
         Profesor: {correccion_bot}
-        Perfil actual: {perfil_actual}
         
         ¿El profesor corrigió un error? 
-        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être"). No uses puntos.
+        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être").
         - Si NO: Devuelve la palabra NINGUNO.
         """
         respuesta = client_gemini.models.generate_content(
@@ -69,29 +68,18 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
         
         if error_detectado and "NINGUNO" not in error_detectado.upper():
-            if error_detectado.lower() not in perfil_actual.lower():
-                nuevo_perfil = error_detectado if perfil_actual == "Aún no hay errores registrados." else f"{perfil_actual}, {error_detectado}"
-                
-                # --- SOLUCIÓN ROBUSTA PARA GUARDAR EN SUPABASE ---
-                try:
-                    # 1. Intentamos actualizar la fila existente
-                    respuesta_update = supabase.table('perfil_errores').update({
-                        "debilidades": nuevo_perfil
-                    }).eq('chat_id', chat_id).execute()
-                    
-                    # 2. Si no se actualizó nada (porque no existía), insertamos una nueva
-                    if not respuesta_update.data:
-                        supabase.table('perfil_errores').insert({
-                            "chat_id": chat_id,
-                            "debilidades": nuevo_perfil
-                        }).execute()
-                        
-                    print(f"✅ ¡ÉXITO! Error guardado en Supabase: {error_detectado}")
-                except Exception as db_error:
-                    print(f"❌ ERROR DE SUPABASE: {db_error}")
+            # FORZAMOS A QUE SIEMPRE SE GUARDE, SIN IMPORTAR SI SE REPITE
+            nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
+            
+            # Actualizamos directamente
+            supabase.table('perfil_errores').update({
+                "debilidades": nuevo_perfil
+            }).eq('chat_id', chat_id).execute()
+            
+            print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
                 
     except Exception as e:
-        print(f"Error en el detective: {e}")
+        print(f"❌ ERROR DEL DETECTIVE: {e}")
 
 def generar_mp3_sync(texto, ruta):
     tts = gTTS(text=texto, lang='fr', slow=False)
