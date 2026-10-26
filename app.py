@@ -24,7 +24,7 @@ TU MISIÓN EN CADA RESPUESTA:
 3. CONTINÚA LA CONVERSACIÓN: Después de corregir, hazle una pregunta nueva y sencilla en francés.
 
 REGLAS:
-- Sé breve. No des discursos largos.
+- Sé breve. No des discursos largos. Responde en máximo 2 o 3 frases.
 - Responde en francés, usa el español solo para la corrección o traducción (entre paréntesis).
 - NO uses asteriscos (*), negritas ni formato markdown.
 - Si no hay error, simplemente responde y haz otra pregunta.
@@ -40,52 +40,10 @@ async def obtener_perfil(chat_id):
         print(f"No se pudo leer el perfil: {e}")
     return "Aún no hay errores registrados."
 
-async def guardar_perfil(chat_id, texto_usuario, correccion_bot):
-    """Extrae el error y lo guarda en la lista de debilidades."""
-    try:
-        # 1. Leemos el perfil actual
-        perfil_actual = await obtener_perfil(chat_id)
-        
-        # 2. Prompt para Gemini: Sé muy estricto
-        prompt_extraccion = f"""
-        Analiza este intercambio:
-        Usuario: {texto_usuario}
-        Profesor: {correccion_bot}
-        Perfil actual del estudiante: {perfil_actual}
-        
-        ¿El profesor corrigió un error? 
-        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être", "Género de sustantivos"). No uses puntos ni formato.
-        - Si NO: Devuelve la palabra NINGUNO.
-        """
-        
-        respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
-            contents=prompt_extraccion
-        )
-        error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
-        
-        if error_detectado and "NINGUNO" not in error_detectado.upper():
-            # 3. Si el error NO está ya en el perfil, lo agregamos
-            if error_detectado.lower() not in perfil_actual.lower():
-                if perfil_actual == "Aún no hay errores registrados.":
-                    nuevo_perfil = error_detectado
-                else:
-                    nuevo_perfil = f"{perfil_actual}, {error_detectado}"
-                
-                # 4. Guardamos en Supabase
-                supabase.table('perfil_errores').upsert({
-                    "chat_id": chat_id,
-                    "debilidades": nuevo_perfil
-                }).execute()
-                print(f"Nuevo error guardado: {error_detectado}")
-                
-    except Exception as e:
-        print(f"Error guardando perfil: {e}")
-
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario: str):
     chat_id = update.effective_chat.id
     
-    # 1. Obtener el perfil de errores
+    # 1. Obtener el perfil de errores (Esto es rápido, solo lee la base de datos)
     perfil = await obtener_perfil(chat_id)
     
     # 2. Crear prompt con el perfil inyectado
@@ -98,8 +56,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     )
     texto_respuesta = respuesta.text
     
-    # 4. Guardar el error en el perfil
-    await guardar_perfil(chat_id, texto_usuario, texto_respuesta)
+    # 4. NOTA: La función guardar_perfil() ha sido eliminada temporalmente para probar la velocidad.
 
     # 5. Responder en Telegram
     await update.message.reply_text(texto_respuesta)
@@ -139,7 +96,7 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     texto_respuesta = respuesta.text
     
-    await guardar_perfil(chat_id, "[Audio enviado]", texto_respuesta)
+    # NOTA: La función guardar_perfil() también ha sido eliminada aquí.
     
     await update.message.reply_text(texto_respuesta)
     
