@@ -71,10 +71,27 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         if error_detectado and "NINGUNO" not in error_detectado.upper():
             if error_detectado.lower() not in perfil_actual.lower():
                 nuevo_perfil = error_detectado if perfil_actual == "Aún no hay errores registrados." else f"{perfil_actual}, {error_detectado}"
-                supabase.table('perfil_errores').upsert({"chat_id": chat_id, "debilidades": nuevo_perfil}).execute()
-                print(f"Nuevo error guardado: {error_detectado}")
+                
+                # --- SOLUCIÓN ROBUSTA PARA GUARDAR EN SUPABASE ---
+                try:
+                    # 1. Intentamos actualizar la fila existente
+                    respuesta_update = supabase.table('perfil_errores').update({
+                        "debilidades": nuevo_perfil
+                    }).eq('chat_id', chat_id).execute()
+                    
+                    # 2. Si no se actualizó nada (porque no existía), insertamos una nueva
+                    if not respuesta_update.data:
+                        supabase.table('perfil_errores').insert({
+                            "chat_id": chat_id,
+                            "debilidades": nuevo_perfil
+                        }).execute()
+                        
+                    print(f"✅ ¡ÉXITO! Error guardado en Supabase: {error_detectado}")
+                except Exception as db_error:
+                    print(f"❌ ERROR DE SUPABASE: {db_error}")
+                
     except Exception as e:
-        print(f"Error guardando perfil: {e}")
+        print(f"Error en el detective: {e}")
 
 def generar_mp3_sync(texto, ruta):
     tts = gTTS(text=texto, lang='fr', slow=False)
