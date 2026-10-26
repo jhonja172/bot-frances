@@ -68,13 +68,14 @@ def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
         error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
         
         if error_detectado and "NINGUNO" not in error_detectado.upper():
-            # FORZAMOS A QUE SIEMPRE SE GUARDE, SIN IMPORTAR SI SE REPITE
+            # Usamos UPSERT para que inserte si no existe, o actualice si existe.
+            # Esto soluciona el problema de la fila borrada.
             nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
             
-            # Actualizamos directamente
-            supabase.table('perfil_errores').update({
+            supabase.table('perfil_errores').upsert({
+                "chat_id": chat_id,
                 "debilidades": nuevo_perfil
-            }).eq('chat_id', chat_id).execute()
+            }).execute()
             
             print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
                 
@@ -118,10 +119,11 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     # Enviamos el texto PRIMERO
     await mensaje.reply_text(texto_respuesta)
     
-    # Guardamos el perfil en segundo plano
-    asyncio.create_task(asyncio.to_thread(guardar_perfil_sync, chat_id, texto_usuario or "[Audio]", texto_respuesta, perfil))
+    # Guardamos el perfil EN PRIMER PLANO (para que salga en los logs al instante)
+    # Usamos asyncio.to_thread para que no bloquee el envío del audio.
+    await asyncio.to_thread(guardar_perfil_sync, chat_id, texto_usuario or "[Audio]", texto_respuesta, perfil)
     
-    # Generamos y enviamos el audio en segundo plano
+    # Generamos y enviamos el audio
     ruta_audio_salida = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temporal:
