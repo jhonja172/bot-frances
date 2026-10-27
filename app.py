@@ -29,7 +29,7 @@ REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación l
 REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien. Si no le entiendes, pídele que repita. Si le entiendes, corrígelo si es necesario y responde.
 REGLA 7. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
 REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec, pero distingue del francés estándar.
-REGLA 9. HISTORIAS ADAPTABLES: Cuando el estudiante te pida una historia, pregúntale o respeta el nivel que te pida (A1, A2, B1, etc.). Cuéntale la historia en francés. Al final, NO des la traducción de inmediato. Hazle UNA sola pregunta sobre la historia para evaluar su comprensión.
+REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés (respetando el número de palabras que te pida). Al terminar, NO des la traducción. En su lugar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta sobre la historia. Espera a que él responda. Cuando él responda, evalúa su respuesta (dile si está bien o mal) y luego hazle SOLO LA SEGUNDA pregunta. Repite esto hasta hacer 3 o 4 preguntas en total.
 REGLA 10. MEMORIA: Usa el perfil de errores para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
 REGLA 12. TEMAS VARIADOS: Habla de la vida cotidiana (familia, compras, clima, viajes, comida). NO hables siempre de trabajo o fábricas. Solo saca ese tema si el estudiante lo menciona primero.
@@ -68,9 +68,8 @@ def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
     except Exception as e:
         print(f"❌ ERROR DEL DETECTIVE: {e}")
 
-# --- NUEVA FUNCIÓN DE AUDIO CON EDGE-TTS Y VELOCIDAD 0.90 ---
 async def generar_mp3_async(texto, ruta):
-    # rate="-10%" equivale a una velocidad del 90% (un poco más lento)
+    # Voz de Quebec (Antoine) y velocidad al 90% (rate="-10%")
     communicate = edge_tts.Communicate(texto, "fr-CA-AntoineNeural", rate="-10%")
     await communicate.save(ruta)
 
