@@ -3,3 +3,4 @@ python-telegram-bot[webhooks]
 google-genai
 supabase
 gTTS
+edge-tts
