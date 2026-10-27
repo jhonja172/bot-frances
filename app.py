@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
 from supabase import create_client, Client
-from gtts import gTTS
+import edge_tts 
 
 # --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -19,26 +19,29 @@ client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 PROMPT_PROFESOR = """
-Eres el profesor personal de francés de Quebec de un estudiante hispanohablante cuyo nivel actual es A1. Tu misión es ayudarlo a comprender el francés hablado, hablar con naturalidad, ganar confianza y avanzar progresivamente hasta B1 y niveles superiores.
-
-Tu enseñanza combina adquisición natural, práctica activa, recuperación de memoria, repetición espaciada y corrección progresiva.
+Eres el profesor personal de francés de Quebec de un estudiante hispanohablante cuyo nivel actual es A1. Tu misión es ayudarlo a comprender el francés hablado, hablar con naturalidad, ganar confianza y avanzar progresivamente.
 
 REGLA 1. FRANCÉS POR DEFECTO: Habla en francés por defecto. Utiliza frases cortas y naturales. Usa español solo cuando el estudiante lo solicite o no comprenda.
-REGLA 2. UNA PREGUNTA A LA VEZ: Haz solamente una pregunta por turno. Espera la respuesta. Procura que el estudiante hable el 80% del tiempo.
-REGLA 3. CORRECCIÓN INTELIGENTE: Corrige máximo 1 o 2 errores importantes por turno. Usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]".
+REGLA 2. UNA PREGUNTA A LA VEZ: Haz solamente una pregunta por turno. Espera la respuesta.
+REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje (ya sea escrito o una nota de voz), analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]". Si es un audio, transcríbelo mentalmente y corrige el error que escuches.
 REGLA 4. APRENDER A HABLAR: Prioriza frases completas. No enseñes listas de palabras aisladas.
-REGLA 5. MÉTODO APA: Adquirir, Practicar, Ajustar.
-REGLA 6. COMPRENSIÓN AUDITIVA: Prioriza escuchar antes de leer. Si no comprende, repite o reformula.
+REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación libre. Haz un mini-ejercicio de 3 pasos basado en el tema que estaban hablando: 1. Enséñame una expresión nueva relacionada. 2. Pídeme que haga una frase con ella. 3. Corrígeme.
+REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien. Si no le entiendes, pídele que repita. Si le entiendes, corrígelo si es necesario y responde.
 REGLA 7. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
 REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec, pero distingue del francés estándar.
-REGLA 9. HISTORIAS: Crea historias cortas adaptadas a su nivel.
+REGLA 9. HISTORIAS ADAPTABLES: Cuando el estudiante te pida una historia, pregúntale o respeta el nivel que te pida (A1, A2, B1, etc.). Cuéntale la historia en francés. Al final, NO des la traducción de inmediato. Hazle UNA sola pregunta sobre la historia para evaluar su comprensión.
 REGLA 10. MEMORIA: Usa el perfil de errores para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
-REGLA 12. TRABAJO: Practica vocabulario de inyección de plástico, máquinas, moldes, entrevistas.
+REGLA 12. TEMAS VARIADOS: Habla de la vida cotidiana (familia, compras, clima, viajes, comida). NO hables siempre de trabajo o fábricas. Solo saca ese tema si el estudiante lo menciona primero.
 REGLA 13. EXPLICACIONES SENCILLAS: Explica la gramática con palabras sencillas.
 REGLA 14. CONFIANZA: Sé paciente, respetuoso y alentador.
 REGLA 15. FORMATO: Escribe respuestas claras para Telegram. NO uses asteriscos (*), negritas ni formato markdown.
-REGLA 16. ADAPTACIÓN: Elige una sola prioridad para la respuesta. Tu objetivo no es hablar mucho, sino conseguir que el estudiante comprenda, responda y mejore.
+REGLA 16. ADAPTACIÓN: Elige una sola prioridad para la respuesta.
+
+REGLA FINAL (MUY IMPORTANTE): Al final de tu respuesta, SIEMPRE, debes añadir una línea oculta con este formato exacto:
+[ERROR: tema_del_error]
+Si no hubo error, escribe: [ERROR: NINGUNO]
+Ejemplo si hubo error: [ERROR: Verbo avoir para la edad]
 """
 
 async def obtener_perfil(chat_id):
@@ -50,43 +53,26 @@ async def obtener_perfil(chat_id):
         print(f"No se pudo leer el perfil: {e}")
     return "Aún no hay errores registrados."
 
-def guardar_perfil_sync(chat_id, texto_usuario, correccion_bot, perfil_actual):
+def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
     try:
-        prompt_extraccion = f"""
-        Analiza este intercambio:
-        Usuario: {texto_usuario}
-        Profesor: {correccion_bot}
-        Perfil actual del estudiante: {perfil_actual}
-        
-        ¿El profesor corrigió un error NUEVO que NO esté ya en el perfil actual? 
-        - Si SÍ: Devuelve SOLO una frase corta con el tema del error (ej: "Preposiciones", "Verbo être"). No uses puntos.
-        - Si el error ya está en el perfil, o no hubo error: Devuelve la palabra NINGUNO.
-        """
-        respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
-            contents=prompt_extraccion
-        )
-        error_detectado = respuesta.text.strip().replace('"', '').replace('.', '')
-        
         if error_detectado and "NINGUNO" not in error_detectado.upper():
             if error_detectado.lower() not in perfil_actual.lower():
                 nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
-                
                 supabase.table('perfil_errores').upsert({
                     "chat_id": chat_id,
                     "debilidades": nuevo_perfil
                 }).execute()
-                
                 print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
             else:
-                print(f"⚠️ El error '{error_detectado}' ya estaba en el perfil. No se guardó.")
-                
+                print(f"⚠️ El error '{error_detectado}' ya estaba. No se guardó.")
     except Exception as e:
         print(f"❌ ERROR DEL DETECTIVE: {e}")
 
-def generar_mp3_sync(texto, ruta):
-    tts = gTTS(text=texto, lang='fr', slow=False)
-    tts.save(ruta)
+# --- NUEVA FUNCIÓN DE AUDIO CON EDGE-TTS Y VELOCIDAD 0.90 ---
+async def generar_mp3_async(texto, ruta):
+    # rate="-10%" equivale a una velocidad del 90% (un poco más lento)
+    communicate = edge_tts.Communicate(texto, "fr-CA-AntoineNeural", rate="-10%")
+    await communicate.save(ruta)
 
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario=None, audio_bytes=None):
     chat_id = update.effective_chat.id
@@ -104,9 +90,8 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             tmp.write(audio_bytes)
             ruta_audio = tmp.name
-            
         audio_file = client_gemini.files.upload(file=ruta_audio)
-        prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nEscucha este audio y responde:"
+        prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nEl estudiante ha enviado una nota de voz. Escúchala, corrígela si es necesario y responde al contenido:"
         respuesta = client_gemini.models.generate_content(
             model='gemini-3.5-flash-lite',
             contents=[prompt_completo, audio_file]
@@ -115,18 +100,30 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     else:
         return
 
-    texto_respuesta = respuesta.text
-    texto_audio = texto_respuesta.replace('*', '').replace('(', '').replace(')', '').replace('[', '').replace(']', '')
+    texto_completo = respuesta.text
     
-    await mensaje.reply_text(texto_respuesta)
+    error_detectado = "NINGUNO"
+    texto_visible = texto_completo
     
-    await asyncio.to_thread(guardar_perfil_sync, chat_id, texto_usuario or "[Audio]", texto_respuesta, perfil)
+    if "[ERROR:" in texto_completo:
+        partes = texto_completo.split("[ERROR:")
+        texto_visible = partes[0].strip()
+        error_extraido = partes[1].replace("]", "").strip()
+        if error_extraido and error_extraido.upper() != "NINGUNO":
+            error_detectado = error_extraido
+
+    texto_audio = texto_visible.replace('*', '').replace('(', '').replace(')', '').replace('[', '').replace(']', '')
+    
+    await mensaje.reply_text(texto_visible)
+    
+    if error_detectado != "NINGUNO":
+        asyncio.create_task(asyncio.to_thread(guardar_perfil_sync, chat_id, error_detectado, perfil))
     
     ruta_audio_salida = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temporal:
             ruta_audio_salida = temporal.name
-        await asyncio.to_thread(generar_mp3_sync, texto_audio, ruta_audio_salida)
+        await generar_mp3_async(texto_audio, ruta_audio_salida)
         with open(ruta_audio_salida, "rb") as archivo_audio:
             await mensaje.reply_voice(voice=archivo_audio)
     except Exception as e:
@@ -179,4 +176,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
