@@ -82,7 +82,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     if texto_usuario:
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nUsuario dice: {texto_usuario}"
         respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
+            model='gemini-3.6-flash',
             contents=prompt_completo
         )
     elif audio_bytes:
@@ -92,7 +92,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
         audio_file = client_gemini.files.upload(file=ruta_audio)
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nEl estudiante ha enviado una nota de voz. Escúchala, corrígela si es necesario y responde al contenido:"
         respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
+            model='gemini-3.6-flash',
             contents=[prompt_completo, audio_file]
         )
         os.remove(ruta_audio)
