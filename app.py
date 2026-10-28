@@ -6,7 +6,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
 from supabase import create_client, Client
-import edge_tts 
+import edge_tts
+from groq import Groq
 
 # --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -14,15 +15,17 @@ GEMINI_KEY = os.environ.get('GEMINI_KEY')
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
 RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
+GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 
 client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+client_groq = Groq(api_key=GROQ_API_KEY)
 
 PROMPT_PROFESOR = """
 Eres el profesor personal de francés de Quebec de un estudiante hispanohablante cuyo nivel actual es A1. Tu misión es ayudarlo a comprender el francés hablado, hablar con naturalidad, ganar confianza y avanzar progresivamente.
 
 REGLA 1. FRANCÉS POR DEFECTO: Habla en francés por defecto. Utiliza frases cortas y naturales. Usa español solo cuando el estudiante lo solicite o no comprenda.
-REGLA 2. UNA PREGUNTA A LA VEZ: Haz solamente una pregunta por turno. Espera la respuesta.
+REGLA 2. UNA PREGUNTA A LA VEZ Y VARIEDAD: Haz solamente una pregunta por turno. Espera la respuesta. NUNCA repitas la misma pregunta que ya hiciste antes. Si el estudiante responde con una palabra o frase corta, hazle una pregunta de seguimiento sobre SU respuesta (ej: ¿Por qué?, ¿Y tú qué opinas?), no vuelvas a preguntar lo mismo.
 REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje (ya sea escrito o una nota de voz), analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]". Si es un audio, transcríbelo mentalmente y corrige el error que escuches.
 REGLA 4. APRENDER A HABLAR: Prioriza frases completas. No enseñes listas de palabras aisladas.
 REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación libre. Haz un mini-ejercicio de 3 pasos basado en el tema que estaban hablando: 1. Enséñame una expresión nueva relacionada. 2. Pídeme que haga una frase con ella. 3. Corrígeme.
@@ -32,7 +35,7 @@ REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec, pero distingue del 
 REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés (respetando el número de palabras que te pida). Al terminar, NO des la traducción. En su lugar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta sobre la historia. Espera a que él responda. Cuando él responda, evalúa su respuesta (dile si está bien o mal) y luego hazle SOLO LA SEGUNDA pregunta. Repite esto hasta hacer 3 o 4 preguntas en total.
 REGLA 10. MEMORIA: Usa el perfil de errores para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
-REGLA 12. TEMAS VARIADOS: Habla de la vida cotidiana (familia, compras, clima, viajes, comida). NO hables siempre de trabajo o fábricas. Solo saca ese tema si el estudiante lo menciona primero.
+REGLA 12. TEMAS VARIADOS Y PROHIBIDO REPETIR: Habla de la vida cotidiana (familia, compras, clima, viajes, comida, música, películas). NO hables siempre de trabajo o fábricas. IMPORTANTE: Si ya hablaron de un tema (ej: trabajo), NO vuelvas a sacar ese tema en los siguientes 5 mensajes. Cambia de tema constantemente para que la práctica sea variada.
 REGLA 13. EXPLICACIONES SENCILLAS: Explica la gramática con palabras sencillas.
 REGLA 14. CONFIANZA: Sé paciente, respetuoso y alentador.
 REGLA 15. FORMATO: Escribe respuestas claras para Telegram. NO uses asteriscos (*), negritas ni formato markdown.
@@ -69,11 +72,22 @@ def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
         print(f"❌ ERROR DEL DETECTIVE: {e}")
 
 async def generar_mp3_async(texto, ruta):
-    # Voz de Quebec (Antoine) y velocidad al 90% (rate="-10%")
     communicate = edge_tts.Communicate(texto, "fr-CA-AntoineNeural", rate="-10%")
     await communicate.save(ruta)
 
-async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario=None, audio_bytes=None):
+async def transcribir_con_groq(ruta_audio):
+    def _transcribir():
+        with open(ruta_audio, "rb") as file:
+            transcripcion = client_groq.audio.transcriptions.create(
+                file=file,
+                model="whisper-large-v3-turbo",
+                language="fr",
+                response_format="text"
+            )
+        return transcripcion
+    return await asyncio.to_thread(_transcribir)
+
+async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario=None):
     chat_id = update.effective_chat.id
     mensaje = update.message
     
@@ -85,17 +99,6 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
             model='gemini-3.5-flash-lite',
             contents=prompt_completo
         )
-    elif audio_bytes:
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-            tmp.write(audio_bytes)
-            ruta_audio = tmp.name
-        audio_file = client_gemini.files.upload(file=ruta_audio)
-        prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nEl estudiante ha enviado una nota de voz. Escúchala, corrígela si es necesario y responde al contenido:"
-        respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
-            contents=[prompt_completo, audio_file]
-        )
-        os.remove(ruta_audio)
     else:
         return
 
@@ -148,26 +151,28 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temporal:
             ruta_entrada = temporal.name
         await archivo_telegram.download_to_drive(custom_path=ruta_entrada)
-        audio_bytes = Path(ruta_entrada).read_bytes()
-        await responder(update, context, audio_bytes=audio_bytes)
+        
+        print("🎤 Transcribiendo audio con Groq...")
+        texto_transcrito = await transcribir_con_groq(ruta_entrada)
+        print(f"✅ Texto transcrito: {texto_transcrito}")
+        
+        await responder(update, context, texto_usuario=texto_transcrito)
+        
     except Exception as e:
-        print(f"Error procesando nota de voz: {e}")
+        print(f"❌ Error procesando nota de voz: {e}")
         await update.message.reply_text("No pude procesar esa nota de voz. Intenta enviarla otra vez.")
     finally:
         if ruta_entrada and os.path.exists(ruta_entrada):
             os.remove(ruta_entrada)
 
 def main() -> None:
-    # 1. Primero definimos el webhook_url
     port = int(os.environ.get("PORT", "10000"))
     webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
 
-    # 2. Definimos post_init
     async def post_init(app):
         await app.bot.set_webhook(url=webhook_url)
         print("✅ Webhook configurado automáticamente al arrancar.")
 
-    # 3. El post_init va en el BUILDER, no en run_webhook
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -180,8 +185,6 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
     print(f"Iniciando bot en el puerto {port}...")
-    
-    # 4. Aquí ya no va el post_init
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
