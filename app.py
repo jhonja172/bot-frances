@@ -82,7 +82,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     if texto_usuario:
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nUsuario dice: {texto_usuario}"
         respuesta = client_gemini.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.5-flash-lite',
             contents=prompt_completo
         )
     elif audio_bytes:
@@ -92,7 +92,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
         audio_file = client_gemini.files.upload(file=ruta_audio)
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nEl estudiante ha enviado una nota de voz. Escúchala, corrígela si es necesario y responde al contenido:"
         respuesta = client_gemini.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-3.5-flash-lite',
             contents=[prompt_completo, audio_file]
         )
         os.remove(ruta_audio)
@@ -165,12 +165,19 @@ def main() -> None:
 
     port = int(os.environ.get("PORT", "10000"))
     webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+    
+    # El bot se auto-configura al arrancar
+    async def post_init(app):
+        await app.bot.set_webhook(url=webhook_url)
+        print("✅ Webhook configurado automáticamente al arrancar.")
+    
     print(f"Iniciando bot en el puerto {port}...")
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=TELEGRAM_TOKEN,
         webhook_url=webhook_url,
+        post_init=post_init,
     )
 
 if __name__ == "__main__":
