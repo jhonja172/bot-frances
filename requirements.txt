@@ -1,5 +1,5 @@
 Flask
-python-telegram-bot
+python-telegram-bot[webhooks]
 google-genai
 supabase
 edge-tts
