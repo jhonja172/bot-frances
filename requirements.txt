@@ -3,3 +3,4 @@ python-telegram-bot
 google-genai
 supabase
 edge-tts
+groq
