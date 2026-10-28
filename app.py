@@ -158,26 +158,35 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             os.remove(ruta_entrada)
 
 def main() -> None:
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    # 1. Primero definimos el webhook_url
+    port = int(os.environ.get("PORT", "10000"))
+    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+
+    # 2. Definimos post_init
+    async def post_init(app):
+        await app.bot.set_webhook(url=webhook_url)
+        print("✅ Webhook configurado automáticamente al arrancar.")
+
+    # 3. El post_init va en el BUILDER, no en run_webhook
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
     application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
-    port = int(os.environ.get("PORT", "10000"))
-    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
-    
-    # El bot se auto-configura al arrancar
-    async def post_init(app):
-        await app.bot.set_webhook(url=webhook_url)
-        print("✅ Webhook configurado automáticamente al arrancar.")
-    
     print(f"Iniciando bot en el puerto {port}...")
+    
+    # 4. Aquí ya no va el post_init
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
         url_path=TELEGRAM_TOKEN,
         webhook_url=webhook_url,
-        post_init=post_init,
     )
 
 if __name__ == "__main__":
