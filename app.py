@@ -25,17 +25,17 @@ PROMPT_PROFESOR = """
 Eres el profesor personal de francés de Quebec de un estudiante hispanohablante cuyo nivel actual es A1. Tu misión es ayudarlo a comprender el francés hablado, hablar con naturalidad, ganar confianza y avanzar progresivamente.
 
 REGLA 1. FRANCÉS POR DEFECTO: Habla en francés por defecto. Utiliza frases cortas y naturales. Usa español solo cuando el estudiante lo solicite o no comprenda.
-REGLA 2. UNA PREGUNTA A LA VEZ Y VARIEDAD: Haz solamente una pregunta por turno. Espera la respuesta. NUNCA repitas la misma pregunta que ya hiciste antes. Si el estudiante responde con una palabra o frase corta, hazle una pregunta de seguimiento sobre SU respuesta (ej: ¿Por qué?, ¿Y tú qué opinas?), no vuelvas a preguntar lo mismo.
-REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje (ya sea escrito o una nota de voz), analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]". Si es un audio, transcríbelo mentalmente y corrige el error que escuches.
-REGLA 4. APRENDER A HABLAR: Prioriza frases completas. No enseñes listas de palabras aisladas.
-REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación libre. Haz un mini-ejercicio de 3 pasos basado en el tema que estaban hablando: 1. Enséñame una expresión nueva relacionada. 2. Pídeme que haga una frase con ella. 3. Corrígeme.
-REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien. Si no le entiendes, pídele que repita. Si le entiendes, corrígelo si es necesario y responde.
+REGLA 2. UNA PREGUNTA A LA VEZ Y VARIEDAD: Haz solamente una pregunta por turno. Espera la respuesta. NUNCA repitas la misma pregunta que ya hiciste antes.
+REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje, analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]".
+REGLA 4. APRENDER A HABLAR: Prioriza frases completas.
+REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación libre. Haz un mini-ejercicio de 3 pasos basado en el tema que estaban hablando.
+REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien (se te dará la transcripción).
 REGLA 7. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
-REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec, pero distingue del francés estándar.
-REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés (respetando el número de palabras que te pida). Al terminar, NO des la traducción. En su lugar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta sobre la historia. Espera a que él responda. Cuando él responda, evalúa su respuesta (dile si está bien o mal) y luego hazle SOLO LA SEGUNDA pregunta. Repite esto hasta hacer 3 o 4 preguntas en total.
+REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec.
+REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés. Al terminar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta sobre la historia. Espera a que él responda. Cuando él responda, evalúa su respuesta y luego hazle SOLO LA SEGUNDA pregunta. Repite esto hasta hacer 3 o 4 preguntas en total.
 REGLA 10. MEMORIA: Usa el perfil de errores para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
-REGLA 12. TEMAS VARIADOS Y PROHIBIDO REPETIR: Habla de la vida cotidiana (familia, compras, clima, viajes, comida, música, películas). NO hables siempre de trabajo o fábricas. IMPORTANTE: Si ya hablaron de un tema (ej: trabajo), NO vuelvas a sacar ese tema en los siguientes 5 mensajes. Cambia de tema constantemente para que la práctica sea variada.
+REGLA 12. TEMAS VARIADOS Y PROHIBIDO REPETIR: Habla de la vida cotidiana. Si ya hablaron de un tema, NO vuelvas a sacar ese tema en los siguientes 5 mensajes.
 REGLA 13. EXPLICACIONES SENCILLAS: Explica la gramática con palabras sencillas.
 REGLA 14. CONFIANZA: Sé paciente, respetuoso y alentador.
 REGLA 15. FORMATO: Escribe respuestas claras para Telegram. NO uses asteriscos (*), negritas ni formato markdown.
@@ -44,7 +44,6 @@ REGLA 16. ADAPTACIÓN: Elige una sola prioridad para la respuesta.
 REGLA FINAL (MUY IMPORTANTE): Al final de tu respuesta, SIEMPRE, debes añadir una línea oculta con este formato exacto:
 [ERROR: tema_del_error]
 Si no hubo error, escribe: [ERROR: NINGUNO]
-Ejemplo si hubo error: [ERROR: Verbo avoir para la edad]
 """
 
 async def obtener_perfil(chat_id):
@@ -66,8 +65,6 @@ def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
                     "debilidades": nuevo_perfil
                 }).execute()
                 print(f"✅ ¡ÉXITO TOTAL! Guardado en Supabase: {error_detectado}")
-            else:
-                print(f"⚠️ El error '{error_detectado}' ya estaba. No se guardó.")
     except Exception as e:
         print(f"❌ ERROR DEL DETECTIVE: {e}")
 
@@ -87,6 +84,18 @@ async def transcribir_con_groq(ruta_audio):
         return transcripcion
     return await asyncio.to_thread(_transcribir)
 
+async def pensar_con_groq(prompt):
+    """Usa Groq para generar la respuesta de texto (mucho más límite que Gemini)."""
+    def _pensar():
+        completion = client_groq.chat.completions.create(
+            model="llama-3.3-70b-versatile", # Modelo potente y rápido de Groq
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return completion.choices[0].message.content
+    return await asyncio.to_thread(_pensar)
+
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_usuario=None):
     chat_id = update.effective_chat.id
     mensaje = update.message
@@ -95,15 +104,28 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     
     if texto_usuario:
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nUsuario dice: {texto_usuario}"
-        respuesta = client_gemini.models.generate_content(
-            model='gemini-3.5-flash-lite',
-            contents=prompt_completo
-        )
+        
+        # 1. Intentar con Groq (límite generoso)
+        try:
+            texto_completo = await pensar_con_groq(prompt_completo)
+            print("🧠 Respuesta generada por Groq")
+        except Exception as e:
+            print(f"⚠️ Groq falló, intentando con Gemini... Error: {e}")
+            # 2. Respaldo: Gemini (si Groq falla)
+            try:
+                respuesta = client_gemini.models.generate_content(
+                    model='gemini-3.5-flash-lite',
+                    contents=prompt_completo
+                )
+                texto_completo = respuesta.text
+                print("🧠 Respuesta generada por Gemini (respaldo)")
+            except Exception as e2:
+                print(f"❌ Ambos modelos fallaron: {e2}")
+                await mensaje.reply_text("El profesor está descansando un momento. Intenta de nuevo en un minuto.")
+                return
     else:
         return
 
-    texto_completo = respuesta.text
-    
     error_detectado = "NINGUNO"
     texto_visible = texto_completo
     
