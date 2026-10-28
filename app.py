@@ -32,10 +32,10 @@ REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación l
 REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien (se te dará la transcripción).
 REGLA 7. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
 REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec.
-REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés. Al terminar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta sobre la historia. Espera a que él responda. Cuando él responda, evalúa su respuesta y luego hazle SOLO LA SEGUNDA pregunta. Repite esto hasta hacer 3 o 4 preguntas en total.
+REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés. Al terminar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta. Espera a que él responda. Cuando él responda, evalúa y luego hazle SOLO LA SEGUNDA pregunta.
 REGLA 10. MEMORIA: Usa el perfil de errores para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
-REGLA 12. TEMAS VARIADOS Y PROHIBIDO REPETIR: Habla de la vida cotidiana. Si ya hablaron de un tema, NO vuelvas a sacar ese tema en los siguientes 5 mensajes.
+REGLA 12. TEMAS VARIADOS: Habla de la vida cotidiana. NO hables siempre de trabajo.
 REGLA 13. EXPLICACIONES SENCILLAS: Explica la gramática con palabras sencillas.
 REGLA 14. CONFIANZA: Sé paciente, respetuoso y alentador.
 REGLA 15. FORMATO: Escribe respuestas claras para Telegram. NO uses asteriscos (*), negritas ni formato markdown.
@@ -85,10 +85,9 @@ async def transcribir_con_groq(ruta_audio):
     return await asyncio.to_thread(_transcribir)
 
 async def pensar_con_groq(prompt):
-    """Usa Groq para generar la respuesta de texto (mucho más límite que Gemini)."""
     def _pensar():
         completion = client_groq.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Modelo potente y rápido de Groq
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=500
@@ -105,13 +104,11 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     if texto_usuario:
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\nUsuario dice: {texto_usuario}"
         
-        # 1. Intentar con Groq (límite generoso)
         try:
             texto_completo = await pensar_con_groq(prompt_completo)
             print("🧠 Respuesta generada por Groq")
         except Exception as e:
             print(f"⚠️ Groq falló, intentando con Gemini... Error: {e}")
-            # 2. Respaldo: Gemini (si Groq falla)
             try:
                 respuesta = client_gemini.models.generate_content(
                     model='gemini-3.5-flash-lite',
@@ -187,26 +184,37 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if ruta_entrada and os.path.exists(ruta_entrada):
             os.remove(ruta_entrada)
 
+# --- FUNCIÓN MAIN CORREGIDA (Solución de ChatGPT) ---
 def main() -> None:
     port = int(os.environ.get("PORT", "10000"))
-    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
 
-    async def post_init(app):
-        await app.bot.set_webhook(url=webhook_url)
-        print("✅ Webhook configurado automáticamente al arrancar.")
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError("Falta la variable TELEGRAM_TOKEN en Render.")
+
+    if not RENDER_EXTERNAL_URL:
+        raise RuntimeError("Falta la variable RENDER_EXTERNAL_URL en Render.")
+
+    webhook_url = (
+        f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+    )
 
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
-        .post_init(post_init)
         .build()
     )
-    
+
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
-    application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto)
+    )
+    application.add_handler(
+        MessageHandler(filters.VOICE, manejar_voz)
+    )
 
     print(f"Iniciando bot en el puerto {port}...")
+    print("Configurando el webhook mediante run_webhook...")
+
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
