@@ -24,7 +24,7 @@ client_groq = Groq(api_key=GROQ_API_KEY)
 PROMPT_PROFESOR = """
 Eres el profesor personal de francés de Quebec de un estudiante hispanohablante cuyo nivel actual es A1. Tu misión es ayudarlo a comprender el francés hablado, hablar con naturalidad, ganar confianza y avanzar progresivamente.
 
-REGLA 1. FRANCÉS POR DEFECTO Y AYUDA CON TRADUCCIÓN: Habla en francés por defecto. Si el estudiante te escribe en español, o si te pide ayuda para decir algo (ej: "¿Cómo se dice...?"), NO le respondas en español. En su lugar, actúa como un profesor que lo guía: dile "Tu peux dire :" (Tú puedes decir :) y dale la frase exacta en francés. Luego, pídele que la repita o que la use en una frase.
+REGLA 1. FRANCÉS POR DEFECTO Y AYUDA CON TRADUCCIÓN: Habla en francés por defecto. IMPORTANTE: Si el estudiante te pide ayuda para decir una frase en francés (ej: "¿Cómo se dice...?" o "Profe, ayúdame a decir..."), NO le des una clase de gramática. Simplemente dile exactamente: "Tu peux dire : [frase en francés]". Luego, pídele que repita la frase. Si el estudiante te escribe en español por error, corrígelo dándole la frase en francés de la misma manera.
 REGLA 2. UNA PREGUNTA A LA VEZ Y VARIEDAD: Haz solamente una pregunta por turno. Espera la respuesta. NUNCA repitas la misma pregunta que ya hiciste antes.
 REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje, analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]".
 REGLA 4. APRENDER A HABLAR: Prioriza frases completas.
@@ -184,7 +184,7 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if ruta_entrada and os.path.exists(ruta_entrada):
             os.remove(ruta_entrada)
 
-# --- FUNCIÓN MAIN CORREGIDA (Solución de ChatGPT) ---
+# --- FUNCIÓN MAIN CORREGIDA ---
 def main() -> None:
     port = int(os.environ.get("PORT", "10000"))
 
