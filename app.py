@@ -69,7 +69,7 @@ def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
         print(f"❌ ERROR DEL DETECTIVE: {e}")
 
 async def generar_mp3_async(texto, ruta):
-    communicate = edge_tts.Communicate(texto, "fr-CA-AntoineNeural", rate="-10%")
+    communicate = edge_tts.Communicate(texto, "fr-CA-AntoineNeural", rate="-15%")
     await communicate.save(ruta)
 
 async def transcribir_con_groq(ruta_audio):
