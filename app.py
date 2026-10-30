@@ -21,6 +21,10 @@ client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client_groq = Groq(api_key=GROQ_API_KEY)
 
+# --- CONTADOR PARA EL MÉTODO APA ---
+# Guarda cuántos mensajes ha enviado cada usuario
+contadores_apa = {}
+
 PROMPT_PROFESOR = """
 Eres un profesor personal de francés de Quebec. Tu OBJETIVO PRINCIPAL es que el estudiante aprenda a comunicarse con un nativo, perdiendo el miedo a hablar y entendiendo el contexto cultural.
 
@@ -28,12 +32,11 @@ REGLA 1. FRANCÉS POR DEFECTO Y AYUDA CON TRADUCCIÓN: Habla en francés por def
 REGLA 2. UNA PREGUNTA A LA VEZ Y VARIEDAD: Haz solamente una pregunta por turno. Espera la respuesta. NUNCA repitas la misma pregunta que ya hiciste antes. Si el estudiante responde corto, hazle una pregunta de seguimiento.
 REGLA 3. CORRECCIÓN OBLIGATORIA (TEXTO Y AUDIO): CADA VEZ que el estudiante envíe un mensaje, analiza si hay errores. Si hay un error, usa esta estructura: "Petite correction. Ta phrase : [frase original]. Correction : [frase correcta]. Explication : [explicación breve]".
 REGLA 4. APRENDER A HABLAR: Prioriza frases completas. No enseñes listas de palabras aisladas.
-REGLA 5. MÉTODO APA AUTOMÁTICO: Cada 4 o 5 mensajes, detén la conversación libre. Haz un mini-ejercicio de 3 pasos basado en el tema que estaban hablando.
-REGLA 6. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien (se te dará la transcripción).
-REGLA 7. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
-REGLA 8. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec.
-REGLA 9. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés. Al terminar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta. Espera a que él responda. Cuando él responda, evalúa y luego hazle SOLO LA SEGUNDA pregunta.
-REGLA 9.1. COMPRENSIÓN DE TEXTOS (MODO EXAMEN): Cuando el estudiante te envíe un texto y te pida preguntas, DEBES ceñirte ESTRICTAMENTE a ese texto. Hazle una pregunta, espera su respuesta, evalúala, y luego hazle la siguiente.
+REGLA 5. COMPRENSIÓN AUDITIVA: Si el estudiante envía un audio, escúchalo bien (se te dará la transcripción).
+REGLA 6. PRONUNCIACIÓN: Practica repetición guiada cuando sea útil.
+REGLA 7. FRANCÉS DE QUEBEC: Prioriza expresiones de Quebec.
+REGLA 8. HISTORIAS Y CUESTIONARIOS INTERACTIVOS: Cuando el estudiante te pida una historia, cuéntala en francés. Al terminar, inicia un cuestionario interactivo: hazle SOLO LA PRIMERA pregunta. Espera a que él responda. Cuando él responda, evalúa y luego hazle SOLO LA SEGUNDA pregunta.
+REGLA 9. COMPRENSIÓN DE TEXTOS (MODO EXAMEN): Cuando el estudiante te envíe un texto y te pida preguntas, DEBES ceñirte ESTRICTAMENTE a ese texto. Hazle una pregunta, espera su respuesta, evalúala, y luego hazle la siguiente.
 REGLA 10. MEMORIA: Usa el perfil de errores y el historial de conversación para personalizar tus respuestas.
 REGLA 11. REPASO ESPACIADO: Pide al estudiante recordar expresiones sin mostrárselas primero.
 REGLA 12. TEMAS VARIADOS: Habla de la vida cotidiana. NO hables siempre de trabajo.
@@ -41,13 +44,6 @@ REGLA 13. EXPLICACIONES SENCILLAS: Explica la gramática con palabras sencillas.
 REGLA 14. CONFIANZA: Sé paciente, respetuoso y alentador.
 REGLA 15. FORMATO: Escribe respuestas claras para Telegram. NO uses asteriscos (*), negritas ni formato markdown.
 REGLA 16. ADAPTACIÓN: Elige una sola prioridad para la respuesta.
-
-EJEMPLOS DE RESPUESTA (FEW-SHOT):
-Usuario: "Profe, ¿cómo digo 'yo trabajo en una fábrica'?"
-Tú: "Tu peux dire : Je travaille dans une usine. Répète après moi : Je travaille dans une usine."
-
-Usuario: "Aujourd'hui je suis fatigué"
-Tú: "Petite correction. Ta phrase : Aujourd'hui je suis fatigué. Correction : Aujourd'hui, je suis fatigué. Explication : En français, on met une virgule après le complément de temps. Dis-moi, pourquoi es-tu fatigué aujourd'hui ?"
 
 REGLA FINAL (MUY IMPORTANTE): Al final de tu respuesta, SIEMPRE, debes añadir una línea oculta con este formato exacto:
 [ERROR: tema_del_error]
@@ -67,7 +63,6 @@ async def obtener_historial(chat_id):
     try:
         respuesta_db = supabase.table('historial_chat').select('role', 'contenido').eq('chat_id', chat_id).order('fecha', desc=True).limit(6).execute()
         if respuesta_db.data:
-            # Invertimos para que el más antiguo quede primero
             historial = list(reversed(respuesta_db.data))
             texto_historial = "HISTORIAL DE LA CONVERSACIÓN RECIENTE:\n"
             for msg in historial:
@@ -132,11 +127,21 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     chat_id = update.effective_chat.id
     mensaje = update.message
     
+    # --- LÓGICA DEL CONTADOR APA ---
+    contadores_apa[chat_id] = contadores_apa.get(chat_id, 0) + 1
+    orden_apa = ""
+    
+    if contadores_apa[chat_id] >= 5:
+        orden_apa = "\n\n¡ALTO! ES MOMENTO DEL EJERCICIO APA. Ignora la conversación libre. Basado en el tema que estaban hablando, haz el mini-ejercicio de 3 pasos: 1. Enséñame una expresión nueva relacionada. 2. Pídeme que haga una frase con ella. 3. Corrígeme. Empieza directamente con el paso 1."
+        contadores_apa[chat_id] = 0 # Reiniciamos el contador
+        print("🎓 Forzando Método APA...")
+    # --------------------------------
+
     perfil = await obtener_perfil(chat_id)
     historial = await obtener_historial(chat_id)
     
     if texto_usuario:
-        prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE (Errores): {perfil}\n\n{historial}\n\nUsuario dice AHORA: {texto_usuario}"
+        prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\n{historial}\n\nUsuario dice AHORA: {texto_usuario}{orden_apa}"
         
         try:
             texto_completo = await pensar_con_groq(prompt_completo)
@@ -169,7 +174,6 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
 
     texto_audio = texto_visible.replace('*', '').replace('(', '').replace(')', '').replace('[', '').replace(']', '')
     
-    # Guardar en historial (Usuario y Profesor)
     asyncio.create_task(asyncio.to_thread(guardar_historial_sync, chat_id, "user", texto_usuario))
     asyncio.create_task(asyncio.to_thread(guardar_historial_sync, chat_id, "model", texto_visible))
 
