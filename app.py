@@ -8,7 +8,7 @@ from google import genai
 from supabase import create_client, Client
 import edge_tts
 from groq import Groq
-from aiohttp import web  # <-- NUEVO: Para el servidor web de health
+from aiohttp import web
 
 # --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -208,11 +208,11 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if ruta_entrada and os.path.exists(ruta_entrada):
             os.remove(ruta_entrada)
 
-# --- NUEVA FUNCIÓN PARA EL SERVIDOR WEB ---
+# --- NUEVA FUNCIÓN PARA EL HEALTH CHECK ---
 async def health_check(request):
     return web.Response(text="OK", status=200)
 
-# --- FUNCIÓN MAIN MODIFICADA ---
+# --- FUNCIÓN MAIN CORREGIDA ---
 def main() -> None:
     port = int(os.environ.get("PORT", "10000"))
     webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
@@ -222,18 +222,31 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
     application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
-    # --- INICIAR EL SERVIDOR WEB EN SEGUNDO PLANO ---
-    async def start_web_server():
-        app = web.Application()
-        app.router.add_get('/health', health_check)
-        runner = web.AppRunner(app)
+    # Iniciamos el servidor web DENTRO del bucle de eventos de la aplicación
+    async def post_init(app):
+        # Configurar el webhook de Telegram
+        await app.bot.set_webhook(url=webhook_url)
+        print("✅ Webhook configurado automáticamente.")
+        
+        # Iniciar el servidor de salud para UptimeRobot/Render
+        web_app = web.Application()
+        web_app.router.add_get('/health', health_check)
+        runner = web.AppRunner(web_app)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
         print(f"✅ Servidor de salud en http://0.0.0.0:{port}/health")
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_web_server())
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .post_init(post_init)  # Usamos post_init para arrancar el servidor web
+        .build()
+    )
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
+    application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
 
     print(f"Iniciando bot en el puerto {port}...")
     application.run_webhook(
