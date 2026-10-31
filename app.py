@@ -8,6 +8,7 @@ from google import genai
 from supabase import create_client, Client
 import edge_tts
 from groq import Groq
+from aiohttp import web  # <-- NUEVO: Para el servidor web de health
 
 # --- CONFIGURACIÓN ---
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
@@ -21,8 +22,6 @@ client_gemini = genai.Client(api_key=GEMINI_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client_groq = Groq(api_key=GROQ_API_KEY)
 
-# --- CONTADOR PARA EL MÉTODO APA ---
-# Guarda cuántos mensajes ha enviado cada usuario
 contadores_apa = {}
 
 PROMPT_PROFESOR = """
@@ -76,9 +75,7 @@ async def obtener_historial(chat_id):
 def guardar_historial_sync(chat_id, role, contenido):
     try:
         supabase.table('historial_chat').insert({
-            "chat_id": chat_id,
-            "role": role,
-            "contenido": contenido
+            "chat_id": chat_id, "role": role, "contenido": contenido
         }).execute()
     except Exception as e:
         print(f"Error guardando historial: {e}")
@@ -89,8 +86,7 @@ def guardar_perfil_sync(chat_id, error_detectado, perfil_actual):
             if error_detectado.lower() not in perfil_actual.lower():
                 nuevo_perfil = f"{perfil_actual}, {error_detectado}" if perfil_actual != "Aún no hay errores registrados." else error_detectado
                 supabase.table('perfil_errores').upsert({
-                    "chat_id": chat_id,
-                    "debilidades": nuevo_perfil
+                    "chat_id": chat_id, "debilidades": nuevo_perfil
                 }).execute()
                 print(f"✅ Error guardado: {error_detectado}")
     except Exception as e:
@@ -104,10 +100,7 @@ async def transcribir_con_groq(ruta_audio):
     def _transcribir():
         with open(ruta_audio, "rb") as file:
             transcripcion = client_groq.audio.transcriptions.create(
-                file=file,
-                model="whisper-large-v3-turbo",
-                language="fr",
-                response_format="text"
+                file=file, model="whisper-large-v3-turbo", language="fr", response_format="text"
             )
         return transcripcion
     return await asyncio.to_thread(_transcribir)
@@ -117,8 +110,7 @@ async def pensar_con_groq(prompt):
         completion = client_groq.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=600
+            temperature=0.7, max_tokens=600
         )
         return completion.choices[0].message.content
     return await asyncio.to_thread(_pensar)
@@ -127,22 +119,18 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     chat_id = update.effective_chat.id
     mensaje = update.message
     
-    # --- LÓGICA DEL CONTADOR APA ---
     contadores_apa[chat_id] = contadores_apa.get(chat_id, 0) + 1
     orden_apa = ""
-    
     if contadores_apa[chat_id] >= 5:
         orden_apa = "\n\n¡ALTO! ES MOMENTO DEL EJERCICIO APA. Ignora la conversación libre. Basado en el tema que estaban hablando, haz el mini-ejercicio de 3 pasos: 1. Enséñame una expresión nueva relacionada. 2. Pídeme que haga una frase con ella. 3. Corrígeme. Empieza directamente con el paso 1."
-        contadores_apa[chat_id] = 0 # Reiniciamos el contador
+        contadores_apa[chat_id] = 0
         print("🎓 Forzando Método APA...")
-    # --------------------------------
 
     perfil = await obtener_perfil(chat_id)
     historial = await obtener_historial(chat_id)
     
     if texto_usuario:
         prompt_completo = f"{PROMPT_PROFESOR}\n\nPERFIL DEL ESTUDIANTE: {perfil}\n\n{historial}\n\nUsuario dice AHORA: {texto_usuario}{orden_apa}"
-        
         try:
             texto_completo = await pensar_con_groq(prompt_completo)
             print("🧠 Respuesta generada por Groq")
@@ -150,8 +138,7 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
             print(f"⚠️ Groq falló, intentando con Gemini... Error: {e}")
             try:
                 respuesta = client_gemini.models.generate_content(
-                    model='gemini-3.5-flash-lite',
-                    contents=prompt_completo
+                    model='gemini-3.5-flash-lite', contents=prompt_completo
                 )
                 texto_completo = respuesta.text
                 print("🧠 Respuesta generada por Gemini (respaldo)")
@@ -164,7 +151,6 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
 
     error_detectado = "NINGUNO"
     texto_visible = texto_completo
-    
     if "[ERROR:" in texto_completo:
         partes = texto_completo.split("[ERROR:")
         texto_visible = partes[0].strip()
@@ -176,7 +162,6 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE, texto_us
     
     asyncio.create_task(asyncio.to_thread(guardar_historial_sync, chat_id, "user", texto_usuario))
     asyncio.create_task(asyncio.to_thread(guardar_historial_sync, chat_id, "model", texto_visible))
-
     await mensaje.reply_text(texto_visible)
     
     if error_detectado != "NINGUNO":
@@ -212,13 +197,10 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temporal:
             ruta_entrada = temporal.name
         await archivo_telegram.download_to_drive(custom_path=ruta_entrada)
-        
         print("🎤 Transcribiendo audio con Groq...")
         texto_transcrito = await transcribir_con_groq(ruta_entrada)
         print(f"✅ Texto transcrito: {texto_transcrito}")
-        
         await responder(update, context, texto_usuario=texto_transcrito)
-        
     except Exception as e:
         print(f"❌ Error procesando nota de voz: {e}")
         await update.message.reply_text("No pude procesar esa nota de voz. Intenta enviarla otra vez.")
@@ -226,36 +208,34 @@ async def manejar_voz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if ruta_entrada and os.path.exists(ruta_entrada):
             os.remove(ruta_entrada)
 
+# --- NUEVA FUNCIÓN PARA EL SERVIDOR WEB ---
+async def health_check(request):
+    return web.Response(text="OK", status=200)
+
+# --- FUNCIÓN MAIN MODIFICADA ---
 def main() -> None:
     port = int(os.environ.get("PORT", "10000"))
+    webhook_url = f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
 
-    if not TELEGRAM_TOKEN:
-        raise RuntimeError("Falta la variable TELEGRAM_TOKEN en Render.")
-
-    if not RENDER_EXTERNAL_URL:
-        raise RuntimeError("Falta la variable RENDER_EXTERNAL_URL en Render.")
-
-    webhook_url = (
-        f"{RENDER_EXTERNAL_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
-    )
-
-    application = (
-        Application.builder()
-        .token(TELEGRAM_TOKEN)
-        .build()
-    )
-
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto)
-    )
-    application.add_handler(
-        MessageHandler(filters.VOICE, manejar_voz)
-    )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manejar_texto))
+    application.add_handler(MessageHandler(filters.VOICE, manejar_voz))
+
+    # --- INICIAR EL SERVIDOR WEB EN SEGUNDO PLANO ---
+    async def start_web_server():
+        app = web.Application()
+        app.router.add_get('/health', health_check)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        print(f"✅ Servidor de salud en http://0.0.0.0:{port}/health")
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_web_server())
 
     print(f"Iniciando bot en el puerto {port}...")
-    print("Configurando el webhook mediante run_webhook...")
-
     application.run_webhook(
         listen="0.0.0.0",
         port=port,
